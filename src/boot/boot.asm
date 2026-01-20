@@ -18,6 +18,7 @@
 ; EBP = Extended Base Pointer, registre 32 bits utilisé pour la pile ou les appels de fonctions, seulement pour la 32 bit, PAS POUR LE 16 BIT, c'est SP POUR LE 16 BITS
 ; ESP = Stack Pointer 32 bits → indique le dessus actuel de la pile
 ; ADDR_KERNEL_OFFSET = l’adresse dans la RAM où ton kernel a été chargé
+; ES = "Extra Segment"
 
 [BITS 16]
 [ORG 0x7C00] ;0x7000 = est juste de la RAM « basse », utilisable par OS ou bootloader
@@ -38,7 +39,8 @@ MOV BP, 0x9000
 MOV SP, BP
 ; Initialise la pile à 0x9000
 ; La pile descend vers le bas quand on fait PUSH, donc elle n’écrasera pas le bootloader
-
+MOV AX, 0x0000      ; Segment 0
+MOV ES, AX 
 MOV BX, ADDR_KERNEL_OFFSET
 ; ES:BX = adresse où charger le kernel
 ; ADDR_KERNEL_OFFSET = offset dans la RAM pour le kernel
