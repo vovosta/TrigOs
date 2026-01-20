@@ -2,48 +2,116 @@
 ; Bootloader to load kernel, switch to 32-bit protected mode and execute kernel
 ; Build with
 ; # nasm -f bin boot.asm -o boot.bin
+; Un offset = la distance par rapport à un point de départ
+; Offset = “combien d’octets je suis loin du début d’un segment”
+; Segment = “point de départ”
+; Adresse physique = segment × 16 + offset
+; DL = numéro du disque
+; BX = adresse mémoire où mettre le kernel
+; DH = nombre de secteurs à lire
+; Mode réel = “tout est permis”
+; Mode protégé = “il faut une carte d’accès pour chaque zone de mémoire”
+; La GDT = la carte d’accès
+; LGDT = dire au CPU où trouver la carte
+; EAX = est un registre général du CPU en mode 32 bits
+; CR0 = un registre spécial pour la CPU
+; EBP = Extended Base Pointer, registre 32 bits utilisé pour la pile ou les appels de fonctions, seulement pour la 32 bit, PAS POUR LE 16 BIT, c'est SP POUR LE 16 BITS
+; ESP = Stack Pointer 32 bits → indique le dessus actuel de la pile
+; ADDR_KERNEL_OFFSET = l’adresse dans la RAM où ton kernel a été chargé
 
-[BITS 16]                               ; 16-bit real mode
-[ORG 0x7C00]                            ; Loaded into memory at 0x7C00
+[BITS 16]
+[ORG 0x7C00] ;0x7000 = est juste de la RAM « basse », utilisable par OS ou bootloader
+; [ORG 0x7C00] dit à l’assembleur : “Mon code sera chargé par le BIOS à 0x7C00, donc écris les instructions et les variables en conséquence.”
 
-MOV [bootDrive], DL                     ; Store DL (boot drive number) in memory
+MOV [bootDrive], DL ; bootdrive = nom de l'endroit où on stocke la variable
+; Sauvegarde le numéro du disque de démarrage fourni par le BIOS (ex: 0x80), sda1, sda2 = faut mais pour imager les disques c'est mieux
+; Nécessaire pour restaurer DL avant les appels INT 13h
 
-MOV BP, 0x9000                          ; Move Base Pointer in free memory space, BP = Baise pointer
-MOV SP, BP                              ; Move Stack Pointer to base of stack, SP=stack pointer
+MOV BP, 0x9000
+; On met BP à 0x9000 pour créer un repère stable pour la pile
+; SP (le dessus de la pile) sera mis au même endroit juste après
+; BP sert à toujours savoir où commence notre pile, même si SP change, car SP n'est pa fiable alors il faut quelques choses de fiable.
+; La pile est un "tiroir temporaire" pour stocker des données pendant que le code travaille
+; SP = dessus du tiroir, BP = repère fixe pour savoir où commence la pile
+; La pile = une partie de la RAM
 
-MOV BX, ADDR_KERNEL_OFFSET              ; ES:BX = Address to load kernel into
-MOV DH, 0x01                            ; DH    = Number of sectors to load
-MOV DL, [bootDrive]                     ; DL    = Drive number to load from
+MOV SP, BP
+; Initialise la pile à 0x9000
+; La pile descend vers le bas quand on fait PUSH, donc elle n’écrasera pas le bootloader
+
+MOV BX, ADDR_KERNEL_OFFSET
+; ES:BX = adresse où charger le kernel
+; ADDR_KERNEL_OFFSET = offset dans la RAM pour le kernel
+; Exemple : si ADDR_KERNEL_OFFSET = 0x1000
+; alors le kernel sera chargé à l’adresse physique ES*16 + 0x1000
+
+MOV DH, 0x01
+; Nombre de secteurs à lire depuis le disque
+; DX = registre de 16 bits utilisé par le BIOS pour passer des paramètres
+; +--------+--------+
+; |  DH    |  DL    |
+; +--------+--------+
+;   8 bits   8 bits
+; DH = high = partie haute de DX (8 bits de gauche)
+; DL = low  = partie basse de DX (8 bits de droite)
+
+
+MOV DL, [bootDrive]                     ; DL    = Drive number to load from, Drive number = numéro du disque que le BIOS utilise pour démarrer ;n'est pas ultra nécéssaire, peut supprimer mais je ne vais pas le faire parceque flemme...
+
 CALL disk_loadSectors                   ; Call disk load function
 
-CLI                                     ; Disable interrupts in preperation for protected mode
+CLI                                     ; Disable interrupts in preperation for protected mode, pour éviter que le CPU prenne un autre tâche et qu'il se concentre seulement sur ce que l'on veut qu'il fasse
+
 LGDT [gdt_descriptor]                   ; Load global descriptor table for protected mode
+; = “Charge la table qui décrit les segments mémoire” GDT c'est juste une table en fait pour les autorisations et les écritures etc, comme sur linux avec r-w-x
+; = nécessaire avant d’activer le mode protégé
+; = sans ça, le CPU ne saura pas comment gérer la RAM en 32 bits
 
-MOV EAX, CR0                            ; Move CR0 to GP register
-OR EAX, 0x1                             ; Set first bit to switch to protected mode
-MOV CR0, EAX                            ; Update CR0 from GP register to complete switch
+MOV EAX, CR0                            ; Move CR0 to GP register ;MOV EAX, CR0 → copie CR0 dans EAX pour pouvoir modifier certains bits
+; Ensuite on peut mettre le bit PE = 1 pour passer en mode protégé
 
-JMP gdt_codeSeg:start32                 ; Jump to start of 32-bit code
+OR EAX, 0x1                             ; Set first bit to switch to protected mode, on met 1 bit pour passer en mode protéger
+
+MOV CR0, EAX                            ; Update CR0 from GP register to complete switch, copier CR0 dans un registre général (EAX)
+
+
+JMP gdt_codeSeg:start32
+; Saute directement au début du code 32 bits
+; gdt_codeSeg = sélecteur du segment de code défini dans la GDT
+; start32 = adresse de départ de ton code en mode protégé
+; Nécessaire après avoir activé le mode protégé pour exécuter du code 32 bits
+
 
 [BITS 32]                               ; 32-bit protected mode
 start32:                                ; Jump target for start of protected mode code
 
-MOV AX, gdt_dataSeg                     ; Update segments for protected mode as defined in GDT
-MOV DS, AX
-MOV SS, AX
-MOV ES, AX
-MOV FS, AX
+MOV AX, gdt_dataSeg                     ; Update segments for protected mode as defined in GDT, On met le sélecteur dans AX pour l’utiliser ensuite sur tous les segments
+MOV DS, AX ; Ici on dit : “DS = segment de données défini dans la GDT”
+MOV SS, AX ; On configure la pile pour qu’elle soit dans le même segment de données sécurisé
+MOV ES, AX ; ES, FS, GS : autres segments de données supplémentaires Beaucoup de routines utilisent ces segments pour stocker ou manipuler des données temporaires on les met tous sur le segment de données principal pour simplifier
+MOV FS, AX 
 MOV GS, AX
 
-MOV EBP, 0x90000                        ; Set stack base at top of free space
-MOV ESP, EBP                            ; Set stack pointer at base of stack
+MOV EBP, 0x90000
+; EBP = base de la pile en 32 bits
+; La pile commence ici (au sommet de l’espace libre)
+; Utilisé pour les appels de fonctions et variables locales
+; SP/ESP pointera sur le dessus de la pile, EBP reste fixe
 
-CALL ADDR_KERNEL_OFFSET                 ; Begin executing the kernel
+MOV ESP, EBP                            ; Set stack pointer at base of stack, comme on a fait au début pour le 16 bit
+
+; Au lieu de CALL ADDR_KERNEL_OFFSET
+MOV EAX, ADDR_KERNEL_OFFSET  ; Charge l'adresse du kernel dans EAX
+CALL EAX                     ; Appelle le kernel via le registre (32 bits sécurisé)
+; OU
+JMP ADDR_KERNEL_OFFSET       ; Simple saut vers le kernel (pas d'adresse de retour)
+
 
 ; void disk_loadSectors ( char* addr , int disk , int num ) ;
 ;   BX = [addr]
 ;   DH = [num:disk]
 ; Load DH sectors from disk DL into address ES:BX
+
 disk_loadSectors:
     PUSHA                               ; Preserve register values in stack
     
