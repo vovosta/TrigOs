@@ -11,3 +11,8 @@ Today guys is trated the bootloader, to be honest copy pasted one from a github 
 Also i bought a book, https://www.amazon.com/dp/2412066965/ref=sspa_dk_detail_0?psc=1&aref=bvb8b8mFqX&sp_csd=d2lkZ2V0TmFtZT1zcF9kZXRhaWw it's this one so like that i can also learn C while sutdying the bootloader. 
 I don't even if he works but i'll compile it only when i'll have finish and if there's any problems i'll try to resolve it.
 Hope to rewrite fast because since a long time i haven't done a commit. Bye guys.
+
+21/01/2026 : 
+Hi guys, today i'm trying to work a bit beacause i have a lot of things to do today so... As you may have seen, i worked a lot yesterday on the bootloader, i think i'm at the middle of the code so, i'm really happy ! 
+Hope to rewrite there soon !
+
